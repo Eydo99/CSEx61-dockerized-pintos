@@ -16,7 +16,6 @@
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
-
 /* Random value for struct thread's `magic' member.
    Used to detect stack overflow.  See the big comment at the top
    of thread.h for details. */
@@ -72,6 +71,7 @@ static void kernel_thread (thread_func *, void *aux);
 static void idle (void *aux UNUSED);
 static struct thread *running_thread (void);
 static struct thread *next_thread_to_run (void);
+static bool thread_priority_less (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
 static void init_thread (struct thread *, const char *name, int priority);
 static bool is_thread (struct thread *) UNUSED;
 static void *alloc_frame (struct thread *, size_t size);
@@ -576,8 +576,7 @@ next_thread_to_run (void)
     }
 }
 
-static bool
-thread_priority_less (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
+static bool thread_priority_less (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
 {
   return list_entry (a, struct thread, elem)->priority
        < list_entry (b, struct thread, elem)->priority;
