@@ -268,6 +268,10 @@ thread_create (const char *name, int priority,
   /* Add to run queue. */
   thread_unblock (t);
 
+  /* Yield if the new thread has higher priority than the current thread. */
+  if (!intr_context () && t->priority > thread_current ()->priority)
+    thread_yield ();
+
   return tid;
 }
 /////////////////////////////////////////////////////////////////////////////////////////////////eyad modified here/////////////////////////////////////////////////////////////////////////////////////
@@ -399,11 +403,33 @@ thread_foreach (thread_action_func *func, void *aux)
     }
 }
 
-/* Sets the current thread's priority to NEW_PRIORITY. */
+/* Sets the current thread's priority to NEW_PRIORITY.
+   Updates base_priority and recomputes the effective priority from any
+   remaining donors, then yields if no longer the highest-priority thread. */
 void
-thread_set_priority (int new_priority) 
+thread_set_priority (int new_priority)
 {
-  thread_current ()->priority = new_priority;
+  if (thread_mlfqs)
+    return;  /* MLFQS manages priorities internally; ignore manual sets. */
+
+  struct thread *cur = thread_current ();
+  cur->base_priority = new_priority;
+
+  /* Recompute effective priority as max of base and all donor priorities. */
+  int eff = new_priority;
+  struct list_elem *e;
+  for (e = list_begin (&cur->donors);
+       e != list_end (&cur->donors);
+       e = list_next (e))
+    {
+      int dp = list_entry (e, struct thread, donation)->priority;
+      if (dp > eff)
+        eff = dp;
+    }
+  cur->priority = eff;
+
+  /* Yield CPU if we are no longer the highest-priority ready thread. */
+  thread_yield ();
 }
 
 /* Returns the current thread's priority. */
@@ -524,24 +550,33 @@ is_thread (struct thread *t)
 /* Does basic initialization of T as a blocked thread named
    NAME. */
 static void
-init_thread (struct thread *t, const char *name, int priority)
+init_thread(struct thread *t, const char *name, int priority)
 {
   enum intr_level old_level;
 
-  ASSERT (t != NULL);
-  ASSERT (PRI_MIN <= priority && priority <= PRI_MAX);
-  ASSERT (name != NULL);
+  ASSERT(t != NULL);
+  ASSERT(PRI_MIN <= priority && priority <= PRI_MAX);
+  ASSERT(name != NULL);
 
-  memset (t, 0, sizeof *t);
+  memset(t, 0, sizeof *t);
+
   t->status = THREAD_BLOCKED;
-  strlcpy (t->name, name, sizeof t->name);
+  strlcpy(t->name, name, sizeof t->name);
+
   t->stack = (uint8_t *) t + PGSIZE;
+
+  t->base_priority = priority;
   t->priority = priority;
+
+  list_init(&t->donors);          
+
+  t->waiting_lock = NULL;
+
   t->magic = THREAD_MAGIC;
 
-  old_level = intr_disable ();
-  list_push_back (&all_list, &t->allelem);
-  intr_set_level (old_level);
+  old_level = intr_disable();
+  list_push_back(&all_list, &t->allelem);
+  intr_set_level(old_level);
 }
 
 /* Allocates a SIZE-byte frame at the top of thread T's stack and
