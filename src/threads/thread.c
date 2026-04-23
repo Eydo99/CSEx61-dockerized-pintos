@@ -24,7 +24,7 @@
 /* List of processes in THREAD_READY state, that is, processes
    that are ready to run but not actually running. */
 static struct list ready_list;
-
+static struct list block_list;
 /* List of all processes.  Processes are added to this list
    when they are first scheduled and removed when they exit. */
 static struct list all_list;
@@ -106,7 +106,7 @@ thread_init (void)
   lock_init (&tid_lock);
   list_init (&ready_list);
   list_init (&all_list);
-
+list_init (&block_list);
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
   init_thread (initial_thread, "main", PRI_DEFAULT);
@@ -705,3 +705,59 @@ allocate_tid (void)
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof (struct thread, stack);
+
+
+bool thread_comparator (const struct list_elem *x,const struct list_elem *y,void *aux UNUSED) 
+
+{
+  struct thread *THREAD1 =list_entry(x,struct thread,elem);
+  
+  struct thread *THREAD2 =list_entry(y,struct thread,elem);
+
+
+  return THREAD1->saba7o_time<THREAD2->saba7o_time;
+
+}
+
+void thread_sleep (int64_t ticks) 
+{
+  struct thread *current_thread=thread_current();
+  
+  enum intr_level last_level;
+
+  last_level = intr_disable ();
+  
+current_thread->saba7o_time=timer_ticks() +ticks;
+
+  list_insert_ordered (&block_list,&current_thread->elem,thread_comparator,NULL);
+    thread_block ();
+  
+intr_set_level (last_level);
+
+}
+
+
+void sa7e_el_noom (int64_t current_ticks) 
+
+{
+  while (!list_empty (&block_list)) 
+    
+  {
+      struct list_elem *CURRENT_ELEMENT =list_begin (&block_list);
+      
+      struct thread *SLEEPING_THREAD =list_entry (CURRENT_ELEMENT,struct thread,elem);
+
+      if (current_ticks >= SLEEPING_THREAD->saba7o_time) 
+        {
+          list_pop_front(&block_list);
+          thread_unblock(SLEEPING_THREAD);
+        } 
+      
+       else 
+       
+       {
+          break; 
+       
+        }
+    }
+}
