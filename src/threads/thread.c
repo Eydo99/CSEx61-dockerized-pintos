@@ -451,6 +451,7 @@ thread_set_nice (int nice)
   (nice*2);
 
   //check if there is other thread that has higher priority after changing nice and then yield current thread if lower
+  thread_yield();
 }
 
 /* Returns the current thread's nice value. */

@@ -140,18 +140,30 @@ sema_up (struct semaphore *sema)
   ASSERT (sema != NULL);
 
   old_level = intr_disable ();
+
   if (!list_empty (&sema->waiters))
     {
+      // Get Max Priority in the waiting list SDX
       struct list_elem *max_e = list_max (&sema->waiters, waiter_priority_less, NULL);
       list_remove (max_e);
-      thread_unblock (list_entry (max_e, struct thread, elem));
-    }
-  sema->value++;
-  intr_set_level (old_level);
 
-  
-  if (!intr_context ())
-    thread_yield ();
+      // Unblock the important thread..
+      struct thread *unblocked_thread = list_entry (max_e, struct thread, elem);
+      thread_unblock (unblocked_thread);
+
+      // Unlock cpu
+      sema->value++;
+      intr_set_level (old_level);
+
+      if (!intr_context () && unblocked_thread->priority > thread_current ()->priority) {
+        thread_yield ();
+      }
+    }
+  else {
+    sema->value++;
+    intr_set_level (old_level);
+  }
+
 }
 
 static void sema_test_helper (void *sema_);
@@ -235,8 +247,10 @@ lock_acquire(struct lock *lock)
     if (lock->holder != NULL) {
         curr->waiting_lock = lock;
         
+      if (!thread_mlfqs) { //SDX
         list_push_back(&lock->holder->donors, &curr->donation);
         donate_priority(curr, lock->holder);
+      }
     }
 
     sema_down(&lock->semaphore);
@@ -293,23 +307,22 @@ lock_release(struct lock *lock)
         e = next;
     }
 
-    
-    curr->priority = curr->base_priority;
+    if (!thread_mlfqs) { //SDX
+      curr->priority = curr->base_priority;
 
-    // compute priority
-    for (e = list_begin(&curr->donors);
-         e != list_end(&curr->donors);
-         e = list_next(e)) {
+      // compute priority
+      for (e = list_begin(&curr->donors);
+           e != list_end(&curr->donors);
+           e = list_next(e)) {
 
         struct thread *t = list_entry(e, struct thread, donation);
 
         if (t->priority > curr->priority)
-            curr->priority = t->priority;
+          curr->priority = t->priority;
+           }
     }
-
     // release lock
     lock->holder = NULL;
-
     sema_up(&lock->semaphore);
 }
 
