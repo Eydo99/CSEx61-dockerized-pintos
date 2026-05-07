@@ -477,7 +477,34 @@ init_thread (struct thread *t, const char *name, int priority)
 	intr_set_level (old_level);
 
 	t->exit_status = 0;
+	list_init(&t->children);
+	sema_init(&t->load_sema,0);
+	t->my_info=NULL;
+	t->load_success=false;
+	t->executable=NULL;
+	t->parent=NULL;
   	memset (t->fd_table, 0, sizeof (t->fd_table));
+}
+
+
+
+struct thread *
+thread_get_by_tid (tid_t tid)
+{
+  struct list_elem *e;
+  enum intr_level old_level = intr_disable();
+  for (e = list_begin (&all_list); e != list_end (&all_list); e = list_next (e))
+    {
+      struct thread *t = list_entry (e, struct thread, allelem);
+      if (t->tid == tid)
+	  {
+		intr_set_level(old_level);
+		return t;
+	  }
+        
+    }
+	intr_set_level(old_level);
+  return NULL;
 }
 
 /* Allocates a SIZE-byte frame at the top of thread T's stack and

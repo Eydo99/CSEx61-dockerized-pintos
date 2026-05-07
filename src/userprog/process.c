@@ -17,7 +17,6 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
-
 /* Used for setup_stack */
 static void push_stack(int order, void **esp, char *token, char **argv, int argc);
 
@@ -48,7 +47,32 @@ process_execute (const char *file_name)
 	/* Create a new thread to execute FILE_NAME. */
 	tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
 	if (tid == TID_ERROR)
+	{
 		palloc_free_page (fn_copy);
+		return TID_ERROR;
+	}
+
+	enum intr_level old_level = intr_disable();
+	struct child_info *info = malloc(sizeof(struct child_info));
+	if (info == NULL)
+	{
+		intr_set_level(old_level);
+    	return TID_ERROR;
+	}
+	info->tid=tid;
+	info->exit_status=0;
+	info->waited=false;
+	info->ref_count=2;
+	sema_init(&info->sema,0);
+	lock_init(&info->ref_lock);
+	struct thread *child = thread_get_by_tid(tid);
+	child->my_info = info;
+	child->parent=thread_current();
+	intr_set_level(old_level);
+	list_push_back(&thread_current()->children, &info->elem);
+	sema_down(&thread_current()->load_sema);
+	if (!thread_current()->load_success)
+    	return TID_ERROR;
 	return tid;
 }
 
@@ -71,6 +95,8 @@ start_process (void *file_name_)
 	if_.cs = SEL_UCSEG;
 	if_.eflags = FLAG_IF | FLAG_MBS;
 	success = load (file_name, &if_.eip, &if_.esp, &save_ptr);
+	thread_current()->load_success=success;
+	sema_up(&thread_current()->parent->load_sema);
 
 	/* If load failed, quit. */
 	palloc_free_page (file_name);
@@ -108,6 +134,7 @@ process_exit (void)
 {
 	struct thread *cur = thread_current ();
 	uint32_t *pd;
+	
 
 	/* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -121,6 +148,27 @@ process_exit (void)
          directory before destroying the process's page
          directory, or our active page directory will be one
          that's been freed (and cleared). */
+		 printf("%s: exit(%d)\n",cur->name,cur->exit_status);
+		 for(int i=2;i<128;i++)
+		 {
+			if(cur->fd_table[i]!=NULL)
+			{
+				file_close(cur->fd_table[i]);
+				cur->fd_table[i]=NULL;
+			}
+		 }
+		file_close(cur->executable);
+		if(cur->my_info!=NULL)
+		{
+			cur->my_info->exit_status=cur->exit_status;
+			sema_up(&cur->my_info->sema);
+			cur->my_info->ref_count--;
+			if(cur->my_info->ref_count==0)
+			{
+				free(cur->my_info);
+			}
+		}
+		cur->executable=NULL;
 		cur->pagedir = NULL;
 		pagedir_activate (NULL);
 		pagedir_destroy (pd);
@@ -324,8 +372,8 @@ load (const char *file_name, void (**eip) (void), void **esp, char **save_ptr)
 	success = true;
 
 	done:
-	/* We arrive here whether the load is successful or not. */
-	file_close (file);
+		if(success) t->executable=file;
+		else file_close(file);
 	return success;
 }
 

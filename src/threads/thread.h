@@ -5,6 +5,7 @@
 #include <list.h>
 #include <stdint.h>
 #include "filesys/file.h"
+#include "threads/synch.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -24,6 +25,19 @@ typedef int tid_t;
 #define PRI_MIN 0                       /* Lowest priority. */
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
+
+
+
+struct child_info
+{
+   tid_t tid; /*identification for the child*/
+   int exit_status; /*child set it before dying*/
+   bool waited; /*has parent already called wait on this child?*/
+   struct semaphore sema; /*parent bolcks on it,child signals it when done*/
+   int ref_count; /*counts how many sides (parent/child) are still alive, starts at 2*/
+   struct lock ref_lock; /* protects ref_count from race conditions*/
+   struct list_elem elem; /*so it can live in the parent's children list*/
+};
 
 /* A kernel thread or user process.
 
@@ -96,9 +110,15 @@ struct thread
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
-    uint32_t *pagedir;                   /* Page directory. */
-    int exit_status;
-    struct file *fd_table[128];
+   uint32_t *pagedir;                   /* Page directory. */
+   int exit_status;
+   struct file *fd_table[128];
+   struct file *executable;      
+   struct list children;        /* List of child_info structs */
+   struct child_info *my_info;  /* Pointer to this thread's own child_info */
+   struct semaphore load_sema;  /* Blocks parent in exec until load completes */
+   bool load_success;           /* Set by child after load attempt */
+   struct thread *parent;
 #endif
 
     /* Owned by thread.c. */
@@ -128,6 +148,7 @@ const char *thread_name (void);
 
 void thread_exit (void) NO_RETURN;
 void thread_yield (void);
+struct thread *thread_get_by_tid (tid_t tid);
 
 /* Performs some operation on thread t, given auxiliary data AUX. */
 typedef void thread_action_func (struct thread *t, void *aux);

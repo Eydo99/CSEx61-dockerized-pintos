@@ -9,6 +9,8 @@
 #include "filesys/file.h"
 #include "threads/synch.h"
 #include "devices/input.h"
+#include "devices/shutdown.h"
+#include"userprog/process.h"
 
 static void syscall_handler (struct intr_frame *);
 static struct lock filesys_lock;
@@ -175,6 +177,27 @@ sys_close (int fd)
 }
 
 
+static void
+sys_exit(int status)
+{
+  thread_current()->exit_status=status;
+  thread_exit();
+}
+
+static tid_t
+sys_exec(const char* cmd_line)
+{
+  tid_t pid=process_execute(cmd_line);
+  return (pid==TID_ERROR)? -1 : pid;
+}
+
+static int
+sys_wait(tid_t pid)
+{
+    return process_wait(pid);
+}
+
+
 //sdx
 static void
 syscall_handler (struct intr_frame *f)
@@ -191,13 +214,13 @@ syscall_handler (struct intr_frame *f)
   switch (syscall_number)
   {
     case SYS_HALT:
-      // power_off();
+    shutdown_power_off();
       break;
 
     case SYS_EXIT:
       // 1 argument: int status
       check_valid_ptr(&args[1]);
-      // sys_exit(args[1]);
+       sys_exit(args[1]);
       break;
 
     case SYS_EXEC:
@@ -206,14 +229,14 @@ syscall_handler (struct intr_frame *f)
       check_valid_ptr(&args[1]);
       const char *cmd_line = (const char *) args[1];
       check_valid_ptr(cmd_line); // Validate string pointer
-      // f->eax = sys_exec(cmd_line);
+      f->eax = sys_exec(cmd_line);
       break;
     }
 
     case SYS_WAIT:
       // 1 argument: pid_t pid
       check_valid_ptr(&args[1]);
-      // f->eax = sys_wait(args[1]);
+       f->eax = sys_wait(args[1]);
       break;
 
     case SYS_CREATE:
@@ -224,7 +247,7 @@ syscall_handler (struct intr_frame *f)
       const char *file = (const char *) args[1];
       unsigned initial_size = (unsigned) args[2];
       check_valid_ptr(file); // Validate the string pointer
-      // f->eax = sys_create(file, initial_size);
+       f->eax = sys_create(file, initial_size);
       break;
     }
 
@@ -234,7 +257,7 @@ syscall_handler (struct intr_frame *f)
       check_valid_ptr(&args[1]);
       const char *file = (const char *) args[1];
       check_valid_ptr(file); // Validate the string pointer
-      // f->eax = sys_remove(file);
+       f->eax = sys_remove(file);
       break;
     }
 
@@ -244,14 +267,14 @@ syscall_handler (struct intr_frame *f)
       check_valid_ptr(&args[1]);
       const char *file = (const char *) args[1];
       check_valid_ptr(file); // Validate the string pointer
-      // f->eax = sys_open(file);
+       f->eax = sys_open(file);
       break;
     }
 
     case SYS_FILESIZE:
       // 1 argument: int fd
       check_valid_ptr(&args[1]);
-      // f->eax = sys_filesize(args[1]);
+       f->eax = sys_filesize(args[1]);
       break;
 
     case SYS_READ:
@@ -266,7 +289,7 @@ syscall_handler (struct intr_frame *f)
       unsigned size = (unsigned) args[3];
       check_valid_ptr(buffer); // Validate the buffer pointer
 
-      // f->eax = sys_read(fd, buffer, size);
+       f->eax = sys_read(fd, buffer, size);
       break;
     }
 
@@ -281,7 +304,7 @@ syscall_handler (struct intr_frame *f)
       const void *buffer = (const void *) args[2];
       unsigned size = (unsigned) args[3];
       check_valid_ptr(buffer); // Validate the buffer pointer
-      // f->eax = sys_write(fd, buffer, size);
+       f->eax = sys_write(fd, buffer, size);
       break;
     }
 
@@ -289,19 +312,19 @@ syscall_handler (struct intr_frame *f)
       // 2 arguments: int fd, unsigned position
       check_valid_ptr(&args[1]);
       check_valid_ptr(&args[2]);
-      // sys_seek(args[1], args[2]);
+       sys_seek(args[1], args[2]);
       break;
 
     case SYS_TELL:
       // 1 argument: int fd
       check_valid_ptr(&args[1]);
-      // f->eax = sys_tell(args[1]);
+       f->eax = sys_tell(args[1]);
       break;
 
     case SYS_CLOSE:
       // 1 argument: int fd
       check_valid_ptr(&args[1]);
-      // sys_close(args[1]);
+       sys_close(args[1]);
       break;
 
     default:
