@@ -5,12 +5,19 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "userprog/pagedir.h"
+#include "filesys/filesys.h"
+#include "filesys/file.h"
+#include "threads/synch.h"
+#include "devices/input.h"
 
 static void syscall_handler (struct intr_frame *);
+static struct lock filesys_lock;
+
 
 void
 syscall_init (void)
 {
+  lock_init (&filesys_lock);
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
 
@@ -28,6 +35,144 @@ void check_valid_ptr (const void *vaddr)
   }
 }
 
+static int
+fd_add (struct file *f)
+{
+  struct thread *t = thread_current ();
+  for (int i = 2; i < 128; i++)        
+    if (t->fd_table[i] == NULL)
+      {
+        t->fd_table[i] = f;
+        return i;
+      }
+  return -1;                             
+}
+
+static struct file *
+fd_get (int fd)
+{
+  if (fd < 2 || fd >= 128)
+    return NULL;
+  return thread_current ()->fd_table[fd];
+}
+
+static void
+fd_close (int fd)
+{
+  if (fd < 2 || fd >= 128)
+    return;
+  struct thread *t = thread_current ();
+  if (t->fd_table[fd] != NULL)
+    {
+      file_close (t->fd_table[fd]);
+      t->fd_table[fd] = NULL;
+    }
+}
+
+static bool
+sys_create (const char *file, unsigned initial_size)
+{
+  lock_acquire (&filesys_lock);
+  bool ok = filesys_create (file, initial_size);
+  lock_release (&filesys_lock);
+  return ok;
+}
+
+static bool
+sys_remove (const char *file)
+{
+  lock_acquire (&filesys_lock);
+  bool ok = filesys_remove (file);
+  lock_release (&filesys_lock);
+  return ok;
+}
+
+static int
+sys_open (const char *file)
+{
+  lock_acquire (&filesys_lock);
+  struct file *f = filesys_open (file);
+  lock_release (&filesys_lock);
+  if (f == NULL)
+    return -1;
+  int fd = fd_add (f);
+  if (fd == -1)
+    file_close (f);
+  return fd;
+}
+
+static int
+sys_filesize (int fd)
+{
+  struct file *f = fd_get (fd);
+  if (f == NULL) return -1;
+  lock_acquire (&filesys_lock);
+  int size = file_length (f);
+  lock_release (&filesys_lock);
+  return size;
+}
+
+static int
+sys_read (int fd, void *buffer, unsigned size)
+{
+  if (fd == 0)                          
+    {
+      for (unsigned i = 0; i < size; i++)
+        ((uint8_t *) buffer)[i] = input_getc ();
+      return size;
+    }
+  struct file *f = fd_get (fd);
+  if (f == NULL) return -1;
+  lock_acquire (&filesys_lock);
+  int bytes = file_read (f, buffer, size);
+  lock_release (&filesys_lock);
+  return bytes;
+}
+
+static int
+sys_write (int fd, const void *buffer, unsigned size)
+{
+  if (fd == 1)                        
+    {
+      putbuf (buffer, size);
+      return size;
+    }
+  struct file *f = fd_get (fd);
+  if (f == NULL) return -1;
+  lock_acquire (&filesys_lock);
+  int bytes = file_write (f, buffer, size);
+  lock_release (&filesys_lock);
+  return bytes;
+}
+
+static void
+sys_seek (int fd, unsigned position)
+{
+  struct file *f = fd_get (fd);
+  if (f == NULL) return;
+  lock_acquire (&filesys_lock);
+  file_seek (f, position);
+  lock_release (&filesys_lock);
+}
+
+static unsigned
+sys_tell (int fd)
+{
+  struct file *f = fd_get (fd);
+  if (f == NULL) return -1;
+  lock_acquire (&filesys_lock);
+  unsigned pos = file_tell (f);
+  lock_release (&filesys_lock);
+  return pos;
+}
+
+static void
+sys_close (int fd)
+{
+  lock_acquire (&filesys_lock);
+  fd_close (fd);
+  lock_release (&filesys_lock);
+}
 
 
 //sdx
