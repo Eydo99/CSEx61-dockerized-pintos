@@ -95,7 +95,7 @@ start_process (void *file_name_)
 	if_.cs = SEL_UCSEG;
 	if_.eflags = FLAG_IF | FLAG_MBS;
 	success = load (file_name, &if_.eip, &if_.esp, &save_ptr);
-	thread_current()->load_success=success;
+	thread_current()->parent->load_success=success;
 	sema_up(&thread_current()->parent->load_sema);
 
 	/* If load failed, quit. */
@@ -123,9 +123,54 @@ start_process (void *file_name_)
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
 int
-process_wait (tid_t child_tid UNUSED) 
+process_wait (tid_t child_tid) 
 {
-	return -1;
+	struct thread *cur = thread_current ();
+	struct list_elem *e;
+	struct child_info *info = NULL;
+
+	/* Search the children list for a child_info matching child_tid. */
+	for (e = list_begin (&cur->children); e != list_end (&cur->children);
+	     e = list_next (e))
+	{
+		struct child_info *ci = list_entry (e, struct child_info, elem);
+		if (ci->tid == child_tid)
+		{
+			info = ci;
+			break;
+		}
+	}
+
+	/* If child_tid is not a direct child, return -1. */
+	if (info == NULL)
+		return -1;
+
+	/* If we already waited on this child, return -1. */
+	if (info->waited)
+		return -1;
+
+	/* Mark that we are waiting on this child. */
+	info->waited = true;
+
+	/* Block until the child exits (child does sema_up in process_exit). */
+	sema_down (&info->sema);
+
+	/* Retrieve the child's exit status. */
+	int status = info->exit_status;
+
+	/* Remove from the children list and clean up. */
+	list_remove (&info->elem);
+	lock_acquire (&info->ref_lock);
+	info->ref_count--;
+	if (info->ref_count == 0)
+	{
+		lock_release (&info->ref_lock);
+		free (info);
+	}
+	else
+		lock_release (&info->ref_lock);
+
+	return status;
 }
 
 /* Free the current process's resources. */
@@ -158,15 +203,38 @@ process_exit (void)
 			}
 		 }
 		file_close(cur->executable);
+
+		/* Clean up all remaining children (orphan cleanup).
+		   Decrement ref_count for each child_info; free if nobody
+		   else references it. */
+		while (!list_empty (&cur->children))
+		{
+			struct list_elem *e = list_pop_front (&cur->children);
+			struct child_info *ci = list_entry (e, struct child_info, elem);
+			lock_acquire (&ci->ref_lock);
+			ci->ref_count--;
+			if (ci->ref_count == 0)
+			{
+				lock_release (&ci->ref_lock);
+				free (ci);
+			}
+			else
+				lock_release (&ci->ref_lock);
+		}
+
 		if(cur->my_info!=NULL)
 		{
 			cur->my_info->exit_status=cur->exit_status;
 			sema_up(&cur->my_info->sema);
+			lock_acquire (&cur->my_info->ref_lock);
 			cur->my_info->ref_count--;
 			if(cur->my_info->ref_count==0)
 			{
+				lock_release (&cur->my_info->ref_lock);
 				free(cur->my_info);
 			}
+			else
+				lock_release (&cur->my_info->ref_lock);
 		}
 		cur->executable=NULL;
 		cur->pagedir = NULL;
