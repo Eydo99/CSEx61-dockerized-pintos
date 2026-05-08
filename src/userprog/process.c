@@ -40,15 +40,24 @@ process_execute (const char *file_name)
 		return TID_ERROR;
 	strlcpy (fn_copy, file_name, PGSIZE);
 
+	char *fn_copy2 = palloc_get_page(0);
+	if (fn_copy2 == NULL)
+	{
+    	palloc_free_page(fn_copy);
+    	return TID_ERROR;
+	}
+	strlcpy(fn_copy2, file_name, PGSIZE);
+
 	/* Parsed file name */
 	char *save_ptr;
-	file_name = strtok_r((char *) file_name, " ", &save_ptr);
+	file_name = strtok_r(fn_copy, " ", &save_ptr);
 
 	/* Create a new thread to execute FILE_NAME. */
-	tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+	tid = thread_create(file_name, PRI_DEFAULT, start_process, fn_copy2);
+	palloc_free_page(fn_copy);
 	if (tid == TID_ERROR)
 	{
-		palloc_free_page (fn_copy);
+		palloc_free_page(fn_copy2);
 		return TID_ERROR;
 	}
 
@@ -101,7 +110,12 @@ start_process (void *file_name_)
 	/* If load failed, quit. */
 	palloc_free_page (file_name);
 	if (!success)
+	{
+		thread_current()->exit_status=-1;
 		thread_exit ();
+
+	}
+		
 
 	/* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -356,7 +370,7 @@ load (const char *file_name, void (**eip) (void), void **esp, char **save_ptr)
 		printf ("load: %s: open failed\n", file_name);
 		goto done;
 	}
-	file_deny_write(file);
+	
 
 	/* Read and verify executable header. */
 	if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
@@ -436,7 +450,7 @@ load (const char *file_name, void (**eip) (void), void **esp, char **save_ptr)
 
 	/* Start address. */
 	*eip = (void (*) (void)) ehdr.e_entry;
-
+	file_deny_write(file);
 	success = true;
 
 	done:
